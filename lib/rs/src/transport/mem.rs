@@ -53,6 +53,17 @@ struct WriteData {
 }
 
 impl TBufferChannel {
+    pub fn read_is_starving(&self) -> bool {
+        let rdata = self.read.as_ref().lock().unwrap();
+        let wdata = self.write.as_ref().lock().unwrap();
+        (rdata.idx == 0) && (wdata.pos == 0)
+    }
+
+    pub fn write_is_starving(&self) -> bool {
+        let wdata = self.write.as_ref().lock().unwrap();
+        wdata.pos == wdata.cap
+    }
+
     /// Constructs a new, empty `TBufferChannel` with the given
     /// read buffer capacity and write buffer capacity.
     pub fn with_capacity(read_capacity: usize, write_capacity: usize) -> TBufferChannel {
