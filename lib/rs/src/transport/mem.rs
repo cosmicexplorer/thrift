@@ -45,6 +45,14 @@ struct ReadData {
     cap: usize,
 }
 
+impl ReadData {
+    fn readable_bytes(&self) -> usize {
+        assert!(self.idx >= self.pos);
+        assert!(self.cap >= self.idx);
+        self.idx - self.pos
+    }
+}
+
 #[derive(Debug)]
 struct WriteData {
     buf: Box<[u8]>,
@@ -52,16 +60,32 @@ struct WriteData {
     cap: usize,
 }
 
-impl TBufferChannel {
-    pub fn read_is_starving(&self) -> bool {
-        let rdata = self.read.as_ref().lock().unwrap();
-        let wdata = self.write.as_ref().lock().unwrap();
-        (rdata.idx == 0) && (wdata.pos == 0)
+impl WriteData {
+    fn bytes_to_copy(&self) -> usize {
+        assert!(self.cap >= self.pos);
+        self.pos
     }
 
-    pub fn write_is_starving(&self) -> bool {
+    fn writable_bytes(&self) -> usize {
+        assert!(self.cap >= self.pos);
+        self.cap - self.pos
+    }
+}
+
+impl TBufferChannel {
+    pub fn read_has_any(&self) -> bool {
+        let rdata = self.read.as_ref().lock().unwrap();
+        rdata.readable_bytes() > 0
+    }
+
+    pub fn write_has_any(&self) -> bool {
         let wdata = self.write.as_ref().lock().unwrap();
-        wdata.pos == wdata.cap
+        wdata.bytes_to_copy() > 0
+    }
+
+    pub fn write_is_full(&self) -> bool {
+        let wdata = self.write.as_ref().lock().unwrap();
+        wdata.writable_bytes() == 0
     }
 
     /// Constructs a new, empty `TBufferChannel` with the given
@@ -174,7 +198,7 @@ impl TIoChannel for TBufferChannel {
 impl io::Read for TBufferChannel {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut rdata = self.read.as_ref().lock().unwrap();
-        let nread = cmp::min(buf.len(), rdata.idx - rdata.pos);
+        let nread = cmp::min(buf.len(), rdata.readable_bytes());
         buf[..nread].clone_from_slice(&rdata.buf[rdata.pos..rdata.pos + nread]);
         rdata.pos += nread;
         Ok(nread)
@@ -184,7 +208,7 @@ impl io::Read for TBufferChannel {
 impl io::Write for TBufferChannel {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut wdata = self.write.as_ref().lock().unwrap();
-        let nwrite = cmp::min(buf.len(), wdata.cap - wdata.pos);
+        let nwrite = cmp::min(buf.len(), wdata.writable_bytes());
         let (start, end) = (wdata.pos, wdata.pos + nwrite);
         wdata.buf[start..end].clone_from_slice(&buf[..nwrite]);
         wdata.pos += nwrite;
